@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/google/syzkaller/pkg/cover"
-	"github.com/google/syzkaller/pkg/html"
+	"github.com/google/syzkaller/pkg/html/pages"
 	"github.com/google/syzkaller/pkg/log"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/google/syzkaller/pkg/signal"
@@ -54,6 +54,7 @@ func (mgr *Manager) initHTTP() {
 	mux.HandleFunc("/funccover", mgr.httpFuncCover)
 	mux.HandleFunc("/filecover", mgr.httpFileCover)
 	mux.HandleFunc("/input", mgr.httpInput)
+	mux.HandleFunc("/debuginput", mgr.httpDebugInput)
 	// Browsers like to request this, without special handler this goes to / handler.
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {})
 
@@ -197,7 +198,8 @@ func (mgr *Manager) httpCorpus(w http.ResponseWriter, r *http.Request) {
 	defer mgr.mu.Unlock()
 
 	data := UICorpus{
-		Call: r.FormValue("call"),
+		Call:     r.FormValue("call"),
+		RawCover: mgr.cfg.RawCover,
 	}
 	for sig, inp := range mgr.corpus {
 		if data.Call != "" && data.Call != inp.Call {
@@ -293,17 +295,31 @@ func (mgr *Manager) httpCoverCover(w http.ResponseWriter, r *http.Request, funcF
 	var progs []cover.Prog
 	if sig := r.FormValue("input"); sig != "" {
 		inp := mgr.corpus[sig]
-		progs = append(progs, cover.Prog{
-			Data: string(inp.Prog),
-			PCs:  coverToPCs(rg, inp.Cover),
-		})
+		if r.FormValue("update_id") != "" {
+			updateID, err := strconv.Atoi(r.FormValue("update_id"))
+			if err != nil || updateID < 0 || updateID >= len(inp.Updates) {
+				http.Error(w, "bad call_id", http.StatusBadRequest)
+			}
+			progs = append(progs, cover.Prog{
+				Sig:  sig,
+				Data: string(inp.Prog),
+				PCs:  coverToPCs(rg, inp.Updates[updateID].RawCover),
+			})
+		} else {
+			progs = append(progs, cover.Prog{
+				Sig:  sig,
+				Data: string(inp.Prog),
+				PCs:  coverToPCs(rg, inp.Cover),
+			})
+		}
 	} else {
 		call := r.FormValue("call")
-		for _, inp := range mgr.corpus {
+		for sig, inp := range mgr.corpus {
 			if call != "" && call != inp.Call {
 				continue
 			}
 			progs = append(progs, cover.Prog{
+				Sig:  sig,
 				Data: string(inp.Prog),
 				PCs:  coverToPCs(rg, inp.Cover),
 			})
@@ -451,6 +467,46 @@ func (mgr *Manager) httpInput(w http.ResponseWriter, r *http.Request) {
 	w.Write(inp.Prog)
 }
 
+func (mgr *Manager) httpDebugInput(w http.ResponseWriter, r *http.Request) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	inp, ok := mgr.corpus[r.FormValue("sig")]
+	if !ok {
+		http.Error(w, "can't find the input", http.StatusInternalServerError)
+		return
+	}
+	getIDs := func(callID int) []int {
+		ret := []int{}
+		for id, update := range inp.Updates {
+			if update.CallID == callID {
+				ret = append(ret, id)
+			}
+		}
+		return ret
+	}
+	data := []UIRawCallCover{}
+	for pos, line := range strings.Split(string(inp.Prog), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		data = append(data, UIRawCallCover{
+			Sig:       r.FormValue("sig"),
+			Call:      line,
+			UpdateIDs: getIDs(pos),
+		})
+	}
+	extraIDs := getIDs(-1)
+	if len(extraIDs) > 0 {
+		data = append(data, UIRawCallCover{
+			Sig:       r.FormValue("sig"),
+			Call:      ".extra",
+			UpdateIDs: extraIDs,
+		})
+	}
+	executeTemplate(w, rawCoverTemplate, data)
+}
+
 func (mgr *Manager) httpReport(w http.ResponseWriter, r *http.Request) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -553,6 +609,7 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 	var crashes []*UICrash
 	reproAttempts := 0
 	hasRepro, hasCRepro := false, false
+	strace := ""
 	reports := make(map[string]bool)
 	for _, f := range files {
 		if strings.HasPrefix(f, "log") {
@@ -571,6 +628,8 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 		} else if f == "repro.report" {
 		} else if f == "repro0" || f == "repro1" || f == "repro2" {
 			reproAttempts++
+		} else if f == "strace.log" {
+			strace = filepath.Join("crashes", dir, f)
 		}
 	}
 
@@ -602,6 +661,7 @@ func readCrash(workdir, dir string, repros map[string]bool, start time.Time, ful
 		ID:          dir,
 		Count:       len(crashes),
 		Triaged:     triaged,
+		Strace:      strace,
 		Crashes:     crashes,
 	}
 }
@@ -657,6 +717,7 @@ type UICrashType struct {
 	ID          string
 	Count       int
 	Triaged     string
+	Strace      string
 	Crashes     []*UICrash
 }
 
@@ -683,8 +744,9 @@ type UICallType struct {
 }
 
 type UICorpus struct {
-	Call   string
-	Inputs []*UIInput
+	Call     string
+	RawCover bool
+	Inputs   []*UIInput
 }
 
 type UIInput struct {
@@ -693,7 +755,7 @@ type UIInput struct {
 	Cover int
 }
 
-var summaryTemplate = html.CreatePage(`
+var summaryTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -737,6 +799,9 @@ var summaryTemplate = html.CreatePage(`
 			{{if $c.Triaged}}
 				<a href="/report?id={{$c.ID}}">{{$c.Triaged}}</a>
 			{{end}}
+			{{if $c.Strace}}
+				<a href="/file?name={{$c.Strace}}">Strace</a>
+			{{end}}
 		</td>
 	</tr>
 	{{end}}
@@ -754,7 +819,7 @@ var summaryTemplate = html.CreatePage(`
 </body></html>
 `)
 
-var syscallsTemplate = html.CreatePage(`
+var syscallsTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -783,7 +848,7 @@ var syscallsTemplate = html.CreatePage(`
 </body></html>
 `)
 
-var crashTemplate = html.CreatePage(`
+var crashTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -822,7 +887,7 @@ Report: <a href="/report?id={{.ID}}">{{.Triaged}}</a>
 </body></html>
 `)
 
-var corpusTemplate = html.CreatePage(`
+var corpusTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -839,7 +904,12 @@ var corpusTemplate = html.CreatePage(`
 	</tr>
 	{{range $inp := $.Inputs}}
 	<tr>
-		<td><a href='/cover?input={{$inp.Sig}}'>{{$inp.Cover}}</a></td>
+		<td>
+			<a href='/cover?input={{$inp.Sig}}'>{{$inp.Cover}}</a>
+	{{if $.RawCover}}
+		/ <a href="/debuginput?sig={{$inp.Sig}}">[raw]</a>
+	{{end}}
+		</td>
 		<td><a href="/input?sig={{$inp.Sig}}">{{$inp.Short}}</a></td>
 	</tr>
 	{{end}}
@@ -857,7 +927,7 @@ type UIPrio struct {
 	Prio int32
 }
 
-var prioTemplate = html.CreatePage(`
+var prioTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -891,7 +961,7 @@ type UIFallbackCall struct {
 	Errnos     []int
 }
 
-var fallbackCoverTemplate = html.CreatePage(`
+var fallbackCoverTemplate = pages.Create(`
 <!doctype html>
 <html>
 <head>
@@ -910,6 +980,41 @@ var fallbackCoverTemplate = html.CreatePage(`
 		<td>{{$c.Name}}</td>
 		<td>{{if $c.Successful}}{{$c.Successful}}{{end}}</td>
 		<td>{{range $e := $c.Errnos}}{{$e}}&nbsp;{{end}}</td>
+	</tr>
+	{{end}}
+</table>
+</body></html>
+`)
+
+type UIRawCallCover struct {
+	Sig       string
+	Call      string
+	UpdateIDs []int
+}
+
+var rawCoverTemplate = pages.Create(`
+<!doctype html>
+<html>
+<head>
+	<title>syzkaller raw cover</title>
+	{{HEAD}}
+</head>
+<body>
+
+<table class="list_table">
+	<caption>Raw cover</caption>
+	<tr>
+		<th>Line</th>
+		<th>Links</th>
+	</tr>
+	{{range $line := .}}
+	<tr>
+		<td>{{$line.Call}}</td>
+		<td>
+		{{range $id := $line.UpdateIDs}}
+		<a href="/rawcover?input={{$line.Sig}}&update_id={{$id}}">[{{$id}}]</a>
+		{{end}}
+</td>
 	</tr>
 	{{end}}
 </table>

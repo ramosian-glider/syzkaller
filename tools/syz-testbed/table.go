@@ -30,6 +30,15 @@ type ValueCell struct {
 	PValue        *float64
 }
 
+type RatioCell struct {
+	TrueCount  int
+	TotalCount int
+}
+
+type BoolCell struct {
+	Value bool
+}
+
 func NewValueCell(sample *stats.Sample) *ValueCell {
 	return &ValueCell{Value: sample.Median(), Sample: sample}
 }
@@ -40,6 +49,34 @@ func (c *ValueCell) String() string {
 		return fmt.Sprintf("%.1f", c.Value)
 	}
 	return fmt.Sprintf("%.0f", math.Round(c.Value))
+}
+
+func NewRatioCell(trueCount, totalCount int) *RatioCell {
+	return &RatioCell{trueCount, totalCount}
+}
+
+func (c *RatioCell) Float64() float64 {
+	if c.TotalCount == 0 {
+		return 0
+	}
+	return float64(c.TrueCount) / float64(c.TotalCount)
+}
+
+func (c *RatioCell) String() string {
+	return fmt.Sprintf("%.1f%% (%d/%d)", c.Float64()*100.0, c.TrueCount, c.TotalCount)
+}
+
+func NewBoolCell(value bool) *BoolCell {
+	return &BoolCell{
+		Value: value,
+	}
+}
+
+func (c *BoolCell) String() string {
+	if c.Value {
+		return "YES"
+	}
+	return "NO"
 }
 
 func NewTable(topLeft string, columns ...string) *Table {
@@ -155,4 +192,57 @@ func (t *Table) SetRelativeValues(baseColumn string) error {
 		}
 	}
 	return nil
+}
+
+func (t *Table) GetFooterValue(column string) Cell {
+	nonEmptyCells := 0
+	ratioCells := []*RatioCell{}
+	boolCells := []*BoolCell{}
+	valueCells := []*ValueCell{}
+	for rowName := range t.Cells {
+		cell := t.Get(rowName, column)
+		if cell == nil {
+			continue
+		}
+		nonEmptyCells++
+
+		switch v := cell.(type) {
+		case *RatioCell:
+			ratioCells = append(ratioCells, v)
+		case *BoolCell:
+			boolCells = append(boolCells, v)
+		case *ValueCell:
+			valueCells = append(valueCells, v)
+		}
+	}
+	if nonEmptyCells == 0 {
+		return ""
+	}
+	switch nonEmptyCells {
+	case len(ratioCells):
+		var sum, count float64
+		for _, cell := range ratioCells {
+			sum += cell.Float64()
+			count++
+		}
+		return fmt.Sprintf("%.1f%%", sum/count*100.0)
+	case len(valueCells):
+		var sum, count float64
+		for _, cell := range valueCells {
+			sum += cell.Value
+			count++
+		}
+		return fmt.Sprintf("%.1f", sum/count)
+	case len(boolCells):
+		yes := 0
+		for _, cell := range boolCells {
+			if cell.Value {
+				yes++
+			}
+		}
+		return NewRatioCell(yes, len(t.Cells))
+	default:
+		// Column has mixed type cells, we cannot do anything here.
+		return ""
+	}
 }

@@ -11,7 +11,6 @@ package cover
 import (
 	"bytes"
 	"encoding/csv"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -249,11 +248,7 @@ func buildTestBinary(t *testing.T, target *targets.Target, test Test, dir string
 }
 
 func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []byte, error) {
-	dir, err := ioutil.TempDir("", "syz-cover-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
+	dir := t.TempDir()
 	bin := buildTestBinary(t, target, test, dir)
 	subsystem := []mgrconfig.Subsystem{
 		{
@@ -265,7 +260,7 @@ func generateReport(t *testing.T, target *targets.Target, test Test) ([]byte, []
 		},
 	}
 
-	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem, nil, nil)
+	rg, err := MakeReportGenerator(target, "", dir, dir, dir, subsystem, nil, nil, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -339,10 +334,10 @@ func checkCSVReport(t *testing.T, CSVReport []byte) {
 
 	foundMain := false
 	for _, line := range lines {
-		if line[1] == "main" {
+		if line[2] == "main" {
 			foundMain = true
-			if line[2] != "1" && line[3] != "1" {
-				t.Fatalf("function coverage percentage doesn't match %v vs. %v", line[2], "100")
+			if line[3] != "1" && line[4] != "1" {
+				t.Fatalf("function coverage percentage doesn't match %v vs. %v", line[3], "100")
 			}
 		}
 	}

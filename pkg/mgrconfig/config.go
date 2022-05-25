@@ -132,6 +132,11 @@ type Config struct {
 	// eg. "0xffffffff81000000:0x10\n"
 	CovFilter covFilterCfg `json:"cover_filter,omitempty"`
 
+	// For each prog in the corpus, remember the raw array of PCs obtained from the kernel.
+	// It can be useful for debugging syzkaller descriptions and syzkaller itself.
+	// Disabled by default as it slows down fuzzing.
+	RawCover bool `json:"raw_cover"`
+
 	// Reproduce, localize and minimize crashers (default: true).
 	Reproduce bool `json:"reproduce"`
 
@@ -162,6 +167,11 @@ type Config struct {
 	// If this list is not empty and none of the regexps match a bug, it's suppressed.
 	// Regexps are matched against bug title, guilty file and maintainer emails.
 	Interests []string `json:"interests,omitempty"`
+
+	// Path to the strace binary compiled for the target architecture.
+	// If set, for each reproducer syzkaller will run it once more under strace and save
+	// the output.
+	StraceBin string `json:"strace_bin"`
 
 	// Type of virtual machine to use, e.g. "qemu", "gce", "android", "isolated", etc.
 	Type string `json:"type"`

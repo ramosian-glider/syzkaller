@@ -81,9 +81,12 @@ func (env *env) BuildSyzkaller(repoURL, commit string) error {
 	env.optionalFlags = optionalFlags
 	cmd := osutil.Command(MakeBin, "target")
 	cmd.Dir = cfg.Syzkaller
-	cmd.Env = append([]string{}, os.Environ()...)
+	goEnvOptions := []string{
+		"GOPATH=" + cfg.Syzkaller[:srcIndex],
+		"GO111MODULE=auto",
+	}
+	cmd.Env = append(append([]string{}, os.Environ()...), goEnvOptions...)
 	cmd.Env = append(cmd.Env,
-		"GOPATH="+cfg.Syzkaller[:srcIndex],
 		"TARGETOS="+cfg.TargetOS,
 		"TARGETVMARCH="+cfg.TargetVMArch,
 		"TARGETARCH="+cfg.TargetArch,
@@ -96,7 +99,7 @@ func (env *env) BuildSyzkaller(repoURL, commit string) error {
 	if _, err := osutil.Run(time.Hour, cmd); err != nil {
 		goEnvCmd := osutil.Command("go", "env")
 		goEnvCmd.Dir = cfg.Syzkaller
-		goEnvCmd.Env = append(append([]string{}, os.Environ()...), "GOPATH="+cfg.Syzkaller[:srcIndex])
+		goEnvCmd.Env = append(append([]string{}, os.Environ()...), goEnvOptions...)
 		goEnvOut, goEnvErr := osutil.Run(time.Hour, goEnvCmd)
 		gitStatusOut, gitStatusErr := osutil.RunCmd(time.Hour, cfg.Syzkaller, "git", "status")
 		return fmt.Errorf("syzkaller build failed: %v\ngo env (err=%v)\n%s\ngit status (err=%v)\n%s",
@@ -357,30 +360,25 @@ func (inst *inst) testInstance() error {
 }
 
 func (inst *inst) testRepro() error {
-	cfg := inst.cfg
+	var err error
+	execProg, err := SetupExecProg(inst.vm, inst.cfg, inst.reporter, &OptionalConfig{
+		OldFlagsCompatMode: !inst.optionalFlags,
+	})
+	if err != nil {
+		return err
+	}
+	transformError := func(res *RunResult, err error) error {
+		if err != nil {
+			return err
+		}
+		if res != nil && res.Report != nil {
+			return &CrashError{Report: res.Report}
+		}
+		return nil
+	}
 	if len(inst.reproSyz) > 0 {
-		execprogBin, err := inst.vm.Copy(cfg.ExecprogBin)
-		if err != nil {
-			return &TestError{Title: fmt.Sprintf("failed to copy test binary to VM: %v", err)}
-		}
-		// If ExecutorBin is provided, it means that syz-executor is already in the image,
-		// so no need to copy it.
-		executorBin := cfg.SysTarget.ExecutorBin
-		if executorBin == "" {
-			executorBin, err = inst.vm.Copy(inst.cfg.ExecutorBin)
-			if err != nil {
-				return &TestError{Title: fmt.Sprintf("failed to copy test binary to VM: %v", err)}
-			}
-		}
-		progFile := filepath.Join(cfg.Workdir, "repro.prog")
-		if err := osutil.WriteFile(progFile, inst.reproSyz); err != nil {
-			return fmt.Errorf("failed to write temp file: %v", err)
-		}
-		vmProgFile, err := inst.vm.Copy(progFile)
-		if err != nil {
-			return &TestError{Title: fmt.Sprintf("failed to copy test binary to VM: %v", err)}
-		}
-		opts, err := csource.DeserializeOptions(inst.reproOpts)
+		var opts csource.Options
+		opts, err = csource.DeserializeOptions(inst.reproOpts)
 		if err != nil {
 			return err
 		}
@@ -391,82 +389,81 @@ func (inst *inst) testRepro() error {
 		if opts.Sandbox == "" {
 			opts.Sandbox = "none"
 		}
-		if !opts.Fault {
-			opts.FaultCall = -1
-		}
-		cmdSyz := ExecprogCmd(execprogBin, executorBin, cfg.TargetOS, cfg.TargetArch, opts.Sandbox,
-			true, true, true, cfg.Procs, opts.FaultCall, opts.FaultNth, inst.optionalFlags,
-			cfg.Timeouts.Slowdown, vmProgFile)
-		if err := inst.testProgram(cmdSyz, cfg.Timeouts.NoOutputRunningTime); err != nil {
-			return err
-		}
+		opts.Repeat, opts.Threaded = true, true
+		err = transformError(execProg.RunSyzProg(inst.reproSyz,
+			inst.cfg.Timeouts.NoOutputRunningTime, opts))
 	}
-	if len(inst.reproC) == 0 {
-		return nil
+	if err == nil && len(inst.reproC) > 0 {
+		// We should test for more than full "no output" timeout, but the problem is that C reproducers
+		// don't print anything, so we will get a false "no output" crash.
+		err = transformError(execProg.RunCProgRaw(inst.reproC, inst.cfg.Target,
+			inst.cfg.Timeouts.NoOutput/2))
 	}
-	bin, err := csource.BuildNoWarn(cfg.Target, inst.reproC)
-	if err != nil {
-		return err
-	}
-	defer os.Remove(bin)
-	vmBin, err := inst.vm.Copy(bin)
-	if err != nil {
-		return &TestError{Title: fmt.Sprintf("failed to copy test binary to VM: %v", err)}
-	}
-	// We should test for more than full "no output" timeout, but the problem is that C reproducers
-	// don't print anything, so we will get a false "no output" crash.
-	return inst.testProgram(vmBin, cfg.Timeouts.NoOutput/2)
+	return err
 }
 
-func (inst *inst) testProgram(command string, testTime time.Duration) error {
-	outc, errc, err := inst.vm.Run(testTime, nil, command)
-	if err != nil {
-		return fmt.Errorf("failed to run binary in VM: %v", err)
-	}
-	rep := inst.vm.MonitorExecution(outc, errc, inst.reporter,
-		vm.ExitTimeout|vm.ExitNormal|vm.ExitError)
-	if rep == nil {
-		return nil
-	}
-	if err := inst.reporter.Symbolize(rep); err != nil {
-		log.Logf(0, "failed to symbolize report: %v", err)
-	}
-	return &CrashError{Report: rep}
+type OptionalFuzzerArgs struct {
+	Slowdown int
+	RawCover bool
 }
 
-func FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs, verbosity int,
-	cover, debug, test, runtest, optionalFlags bool, slowdown int) string {
+type FuzzerCmdArgs struct {
+	Fuzzer    string
+	Executor  string
+	Name      string
+	OS        string
+	Arch      string
+	FwdAddr   string
+	Sandbox   string
+	Procs     int
+	Verbosity int
+	Cover     bool
+	Debug     bool
+	Test      bool
+	Runtest   bool
+	Optional  *OptionalFuzzerArgs
+}
+
+func FuzzerCmd(args *FuzzerCmdArgs) string {
 	osArg := ""
-	if targets.Get(OS, arch).HostFuzzer {
+	if targets.Get(args.OS, args.Arch).HostFuzzer {
 		// Only these OSes need the flag, because the rest assume host OS.
 		// But speciying OS for all OSes breaks patch testing on syzbot
 		// because old execprog does not have os flag.
-		osArg = " -os=" + OS
+		osArg = " -os=" + args.OS
 	}
 	runtestArg := ""
-	if runtest {
+	if args.Runtest {
 		runtestArg = " -runtest"
 	}
 	verbosityArg := ""
-	if verbosity != 0 {
-		verbosityArg = fmt.Sprintf(" -vv=%v", verbosity)
+	if args.Verbosity != 0 {
+		verbosityArg = fmt.Sprintf(" -vv=%v", args.Verbosity)
 	}
 	optionalArg := ""
-	if optionalFlags {
-		optionalArg = " " + tool.OptionalFlags([]tool.Flag{
-			{Name: "slowdown", Value: fmt.Sprint(slowdown)},
-		})
+	if args.Optional != nil {
+		flags := []tool.Flag{
+			{Name: "slowdown", Value: fmt.Sprint(args.Optional.Slowdown)},
+			{Name: "raw_cover", Value: fmt.Sprint(args.Optional.RawCover)},
+		}
+		optionalArg = " " + tool.OptionalFlags(flags)
 	}
 	return fmt.Sprintf("%v -executor=%v -name=%v -arch=%v%v -manager=%v -sandbox=%v"+
 		" -procs=%v -cover=%v -debug=%v -test=%v%v%v%v",
-		fuzzer, executor, name, arch, osArg, fwdAddr, sandbox,
-		procs, cover, debug, test, runtestArg, verbosityArg, optionalArg)
+		args.Fuzzer, args.Executor, args.Name, args.Arch, osArg, args.FwdAddr, args.Sandbox,
+		args.Procs, args.Cover, args.Debug, args.Test, runtestArg, verbosityArg, optionalArg)
 }
 
 func OldFuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox string, procs int,
 	cover, test, optionalFlags bool, slowdown int) string {
-	return FuzzerCmd(fuzzer, executor, name, OS, arch, fwdAddr, sandbox, procs, 0, cover, false, test, false,
-		optionalFlags, slowdown)
+	var optional *OptionalFuzzerArgs
+	if optionalFlags {
+		optional = &OptionalFuzzerArgs{Slowdown: slowdown}
+	}
+	return FuzzerCmd(&FuzzerCmdArgs{Fuzzer: fuzzer, Executor: executor, Name: name,
+		OS: OS, Arch: arch, FwdAddr: fwdAddr, Sandbox: sandbox, Procs: procs,
+		Verbosity: 0, Cover: cover, Debug: false, Test: test, Runtest: false,
+		Optional: optional})
 }
 
 func ExecprogCmd(execprog, executor, OS, arch, sandbox string, repeat, threaded, collide bool,
@@ -506,7 +503,7 @@ var MakeBin = func() string {
 	return "make"
 }()
 
-func RunnerCmd(prog, fwdAddr, os, arch string, poolIdx, vmIdx int, collide, threaded, newEnv bool) string {
+func RunnerCmd(prog, fwdAddr, os, arch string, poolIdx, vmIdx int, threaded, newEnv bool) string {
 	return fmt.Sprintf("%s -addr=%s -os=%s -arch=%s -pool=%d -vm=%d "+
-		"-collide=%t -threaded=%t -new-env=%t", prog, fwdAddr, os, arch, poolIdx, vmIdx, collide, threaded, newEnv)
+		"-threaded=%t -new-env=%t", prog, fwdAddr, os, arch, poolIdx, vmIdx, threaded, newEnv)
 }

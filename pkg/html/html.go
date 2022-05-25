@@ -1,8 +1,6 @@
 // Copyright 2018 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
-//go:generate ./gen.sh
-
 package html
 
 import (
@@ -15,12 +13,6 @@ import (
 
 	"github.com/google/syzkaller/dashboard/dashapi"
 )
-
-func CreatePage(page string) *template.Template {
-	const headTempl = `<style type="text/css" media="screen">%v</style><script>%v</script>`
-	page = strings.Replace(page, "{{HEAD}}", fmt.Sprintf(headTempl, style, js), 1)
-	return template.Must(template.New("").Funcs(Funcs).Parse(page))
-}
 
 func CreateGlob(glob string) *template.Template {
 	return template.Must(template.New("").Funcs(Funcs).ParseGlob(glob))

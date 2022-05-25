@@ -1003,6 +1003,7 @@ var linuxStackParams = &stackParams{
 		"invalid_op",
 		"report_bug",
 		"fixup_bug",
+		"print_report",
 		"do_error",
 		"invalid_op",
 		"_trap",
@@ -1050,6 +1051,7 @@ var linuxStackParams = &stackParams{
 		"down_write",
 		"down_read_trylock",
 		"down_write_trylock",
+		"down_trylock",
 		"up_read",
 		"up_write",
 		"mutex_lock",
@@ -1400,6 +1402,17 @@ var linuxOopses = append([]*oops{
 				fmt:    "BUG: still has locks held in %[1]v",
 			},
 			{
+				title: compile("BUG: scheduling while atomic"),
+				fmt:   "BUG: scheduling while atomic in %[1]v",
+				stack: &stackFmt{
+					parts: []*regexp.Regexp{
+						linuxCallTrace,
+						parseStackTrace,
+					},
+					skip: []string{"schedule"},
+				},
+			},
+			{
 				title:        compile("BUG: lock held when returning to user space"),
 				report:       compile("BUG: lock held when returning to user space(?:.*\\n)+?.*leaving the kernel with locks still held(?:.*\\n)+?.*at: (?:{{PC}} +)?{{FUNC}}"),
 				fmt:          "BUG: lock held when returning to user space in %[1]v",
@@ -1714,6 +1727,7 @@ var linuxOopses = append([]*oops{
 			compile("WARNING: workqueue cpumask: online intersect > possible intersect"),
 			compile("WARNING: [Tt]he mand mount option (is being|has been) deprecated"),
 			compile("WARNING: Unsupported flag value\\(s\\) of 0x%x in DT_FLAGS_1"), // printed when glibc is dumped
+			compile("WARNING: Unprivileged eBPF is enabled with eIBRS"),
 		},
 	},
 	{
@@ -1869,7 +1883,9 @@ var linuxOopses = append([]*oops{
 				},
 			},
 		},
-		[]*regexp.Regexp{},
+		[]*regexp.Regexp{
+			compile(`general protection fault .* error:\d+ in `),
+		},
 	},
 	{
 		[]byte("stack segment: "),

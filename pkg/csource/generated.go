@@ -6082,10 +6082,8 @@ static long syz_emit_vhci(volatile long a0, volatile long a1)
 static long syz_genetlink_get_family_id(volatile long name, volatile long sock_arg)
 {
 	debug("syz_genetlink_get_family_id(%s, %d)\n", (char*)name, (int)sock_arg);
-	bool dofail = false;
 	int fd = sock_arg;
 	if (fd < 0) {
-		dofail = true;
 		fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
 		if (fd == -1) {
 			debug("syz_genetlink_get_family_id: socket failed: %d\n", errno);
@@ -6093,7 +6091,7 @@ static long syz_genetlink_get_family_id(volatile long name, volatile long sock_a
 		}
 	}
 	struct nlmsg nlmsg_tmp;
-	int ret = netlink_query_family_id(&nlmsg_tmp, fd, (char*)name, dofail);
+	int ret = netlink_query_family_id(&nlmsg_tmp, fd, (char*)name, false);
 	if ((int)sock_arg < 0)
 		close(fd);
 	if (ret < 0) {
@@ -9128,6 +9126,24 @@ static void set_app_seccomp_filter()
 	install_filter(&f);
 }
 
+
+#if GOARCH_amd64 || GOARCH_386
+inline int mkdir(const char* path, mode_t mode)
+{
+	return mkdirat(AT_FDCWD, path, mode);
+}
+
+inline int rmdir(const char* path)
+{
+	return unlinkat(AT_FDCWD, path, AT_REMOVEDIR);
+}
+
+inline int symlink(const char* old_path, const char* new_path)
+{
+	return symlinkat(old_path, AT_FDCWD, new_path);
+}
+#endif
+
 #endif
 #include <fcntl.h>
 #include <grp.h>
@@ -10725,6 +10741,9 @@ int main(void)
 	/*{{{MMAP_DATA}}}*/
 #endif
 
+#if SYZ_HAVE_SETUP_EXT
+	setup_ext();
+#endif
 #if SYZ_SYSCTL
 	setup_sysctl();
 #endif

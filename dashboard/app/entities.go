@@ -143,6 +143,7 @@ type Crash struct {
 	Reported    time.Time // set if this crash was ever reported
 	Maintainers []string  `datastore:",noindex"`
 	Log         int64     // reference to CrashLog text entity
+	Flags       int64     // properties of the Crash
 	Report      int64     // reference to CrashReport text entity
 	ReproOpts   []byte    `datastore:",noindex"`
 	ReproSyz    int64     // reference to ReproSyz text entity
@@ -557,6 +558,17 @@ func (bug *Bug) increaseCrashStats(now time.Time) {
 	if len(bug.DailyStats) > maxBugHistoryDays {
 		bug.DailyStats = bug.DailyStats[len(bug.DailyStats)-maxBugHistoryDays:]
 	}
+}
+
+func (bug *Bug) dailyStatsTail(from time.Time) []BugDailyStats {
+	startDate := timeDate(from)
+	startPos := len(bug.DailyStats)
+	for ; startPos > 0; startPos-- {
+		if bug.DailyStats[startPos-1].Date < startDate {
+			break
+		}
+	}
+	return bug.DailyStats[startPos:]
 }
 
 func markCrashReported(c context.Context, crashID int64, bugKey *db.Key, now time.Time) error {

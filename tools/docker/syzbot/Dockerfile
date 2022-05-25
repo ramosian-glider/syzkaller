@@ -12,7 +12,6 @@ RUN apt-get update --allow-releaseinfo-change
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
 	# Build essentials:
 	gcc g++ binutils make ccache \
-	clang clang-format clang-tidy \
 	# Some common utilities:
 	unzip curl sudo procps psmisc nano vim git bzip2 dh-autoreconf software-properties-common \
 	# These are needed to build Linux kernel:
@@ -32,11 +31,24 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
 RUN curl https://dl.google.com/go/go1.17.linux-amd64.tar.gz | tar -C /usr/local -xz
 ENV PATH /usr/local/go/bin:$PATH
 
+# The default clang-11 is too old, install the latest one.
+RUN apt-get install -y -q gnupg software-properties-common apt-transport-https
+RUN curl https://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add -
+RUN add-apt-repository "deb http://apt.llvm.org/bullseye/ llvm-toolchain-bullseye-13 main"
+RUN apt-get update --allow-releaseinfo-change
+RUN apt-get remove -y -q clang-11
+RUN apt-get install -y -q --no-install-recommends clang-13 clang-format-13 clang-tidy-13
+RUN apt autoremove -y -q
+RUN sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-13 100
+RUN sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-13 100
+RUN sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-13 100
+RUN sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-13 100
+
 # Download and install the custom Clang required to build KMSAN.
 # TODO(@ramosian-glider): switch to stable Clang once KMSAN is upstreamed.
-RUN mkdir -p /syzkaller
-RUN curl https://storage.googleapis.com/syzkaller/clang-2b554920f11c-patched.tar.gz | tar -C /syzkaller -xz
-RUN ln -s /syzkaller/clang-2b554920f11c-patched /syzkaller/clang-kmsan
+ENV CLANG_KMSAN_VER 38e16e1cebb8
+RUN curl https://storage.googleapis.com/syzkaller/clang-${CLANG_KMSAN_VER}.tar.gz | tar -C /usr/local/ -xz
+RUN ln -s /usr/local/clang-${CLANG_KMSAN_VER} /usr/local/clang-kmsan
 
 # Not really GRTE, but it's enough to run some scripts that hardcode the path.
 RUN mkdir -p /usr/grte/v5/bin && ln -s /usr/bin/python3 /usr/grte/v5/bin/python2.7

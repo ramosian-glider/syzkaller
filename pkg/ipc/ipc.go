@@ -289,7 +289,7 @@ func (env *Env) Exec(opts *ExecOpts, p *prog.Prog) (output []byte, info *ProgInf
 		return
 	}
 
-	info, err0 = env.parseOutput(p)
+	info, err0 = env.parseOutput(p, opts)
 	if info != nil && env.config.Flags&FlagSignal == 0 {
 		addFallbackSignal(p, info)
 	}
@@ -323,7 +323,7 @@ func addFallbackSignal(p *prog.Prog, info *ProgInfo) {
 	}
 }
 
-func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
+func (env *Env) parseOutput(p *prog.Prog, opts *ExecOpts) (*ProgInfo, error) {
 	out := env.out
 	ncmd, ok := readUint32(&out)
 	if !ok {
@@ -338,6 +338,9 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 		reply := *(*callReply)(unsafe.Pointer(&out[0]))
 		out = out[unsafe.Sizeof(callReply{}):]
 		var inf *CallInfo
+		if reply.magic != outMagic {
+			return nil, fmt.Errorf("bad reply magic 0x%x", reply.magic)
+		}
 		if reply.index != extraReplyIndex {
 			if int(reply.index) >= len(info.Calls) {
 				return nil, fmt.Errorf("bad call %v index %v/%v", i, reply.index, len(info.Calls))
@@ -372,19 +375,27 @@ func (env *Env) parseOutput(p *prog.Prog) (*ProgInfo, error) {
 	if len(extraParts) == 0 {
 		return info, nil
 	}
-	info.Extra = convertExtra(extraParts)
+	info.Extra = convertExtra(extraParts, opts.Flags&FlagDedupCover > 0)
 	return info, nil
 }
 
-func convertExtra(extraParts []CallInfo) CallInfo {
+func convertExtra(extraParts []CallInfo, dedupCover bool) CallInfo {
 	var extra CallInfo
-	extraCover := make(cover.Cover)
+	if dedupCover {
+		extraCover := make(cover.Cover)
+		for _, part := range extraParts {
+			extraCover.Merge(part.Cover)
+		}
+		extra.Cover = extraCover.Serialize()
+	} else {
+		for _, part := range extraParts {
+			extra.Cover = append(extra.Cover, part.Cover...)
+		}
+	}
 	extraSignal := make(signal.Signal)
 	for _, part := range extraParts {
-		extraCover.Merge(part.Cover)
 		extraSignal.Merge(signal.FromRaw(part.Signal, 0))
 	}
-	extra.Cover = extraCover.Serialize()
 	extra.Signal = make([]uint32, len(extraSignal))
 	i := 0
 	for s := range extraSignal {
@@ -524,6 +535,7 @@ type executeReply struct {
 }
 
 type callReply struct {
+	magic      uint32
 	index      uint32 // call index in the program
 	num        uint32 // syscall number (for cross-checking)
 	errno      uint32

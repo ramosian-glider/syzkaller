@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -15,7 +16,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/syzkaller/pkg/html"
+	"github.com/google/syzkaller/pkg/html/pages"
 	"github.com/google/syzkaller/pkg/osutil"
 	"github.com/gorilla/handlers"
 )
@@ -131,13 +132,26 @@ type uiTable struct {
 	ColumnURL func(string) string
 	RowURL    func(string) string
 	Extra     bool
+	HasFooter bool
 	AlignedBy string
 }
 
+const (
+	HTMLStatsTable         = "stats"
+	HTMLBugsTable          = "bugs"
+	HTMLBugCountsTable     = "bug_counts"
+	HTMLReprosTable        = "repros"
+	HTMLCReprosTable       = "crepros"
+	HTMLReproAttemptsTable = "repro_attempts"
+	HTMLReproDurationTable = "repro_duration"
+)
+
+type uiTableGenerator = func(urlPrefix string, view StatView, r *http.Request) (*uiTable, error)
+
 type uiTableType struct {
+	Key       string
 	Title     string
-	Generator func(urlPrefix string, view *StatView, r *http.Request) (*uiTable, error)
-	URL       string
+	Generator uiTableGenerator
 }
 
 type uiStatView struct {
@@ -145,6 +159,7 @@ type uiStatView struct {
 	TableTypes      map[string]uiTableType
 	ActiveTableType string
 	ActiveTable     *uiTable
+	GenTableURL     func(uiTableType) string
 }
 
 type uiMainPage struct {
@@ -154,7 +169,40 @@ type uiMainPage struct {
 	ActiveView uiStatView
 }
 
-func (ctx *TestbedContext) httpMainStatsTable(urlPrefix string, view *StatView, r *http.Request) (*uiTable, error) {
+func (ctx *TestbedContext) getTableTypes() []uiTableType {
+	allTypeList := []uiTableType{
+		{HTMLStatsTable, "Statistics", ctx.httpMainStatsTable},
+		{HTMLBugsTable, "Bugs", ctx.genSimpleTableController((StatView).GenerateBugTable, true)},
+		{HTMLBugCountsTable, "Bug Counts", ctx.genSimpleTableController((StatView).GenerateBugCountsTable, false)},
+		{HTMLReprosTable, "Repros", ctx.genSimpleTableController((StatView).GenerateReproSuccessTable, true)},
+		{HTMLCReprosTable, "C Repros", ctx.genSimpleTableController((StatView).GenerateCReproSuccessTable, true)},
+		{HTMLReproAttemptsTable, "All Repros", ctx.genSimpleTableController((StatView).GenerateReproAttemptsTable, false)},
+		{HTMLReproDurationTable, "Duration", ctx.genSimpleTableController((StatView).GenerateReproDurationTable, true)},
+	}
+	typeList := []uiTableType{}
+	for _, t := range allTypeList {
+		if ctx.Target.SupportsHTMLView(t.Key) {
+			typeList = append(typeList, t)
+		}
+	}
+	return typeList
+}
+
+func (ctx *TestbedContext) genSimpleTableController(method func(view StatView) (*Table, error),
+	hasFooter bool) uiTableGenerator {
+	return func(urlPrefix string, view StatView, r *http.Request) (*uiTable, error) {
+		table, err := method(view)
+		if err != nil {
+			return nil, fmt.Errorf("table generation failed: %s", err)
+		}
+		return &uiTable{
+			Table:     table,
+			HasFooter: hasFooter,
+		}, nil
+	}
+}
+
+func (ctx *TestbedContext) httpMainStatsTable(urlPrefix string, view StatView, r *http.Request) (*uiTable, error) {
 	alignBy := r.FormValue("align")
 	if alignBy == "" {
 		alignBy = "fuzzing"
@@ -196,26 +244,6 @@ func (ctx *TestbedContext) httpMainStatsTable(urlPrefix string, view *StatView, 
 	}, nil
 }
 
-func (ctx *TestbedContext) httpMainBugTable(urlPrefix string, view *StatView, r *http.Request) (*uiTable, error) {
-	table, err := view.GenerateBugTable()
-	if err != nil {
-		return nil, fmt.Errorf("stat table generation failed: %s", err)
-	}
-	return &uiTable{
-		Table: table,
-	}, nil
-}
-
-func (ctx *TestbedContext) httpMainBugCountsTable(urlPrefix string, view *StatView, r *http.Request) (*uiTable, error) {
-	table, err := view.GenerateBugCountsTable()
-	if err != nil {
-		return nil, fmt.Errorf("bug counts table generation failed: %s", err)
-	}
-	return &uiTable{
-		Table: table,
-	}, nil
-}
-
 func (ctx *TestbedContext) httpMain(w http.ResponseWriter, r *http.Request) {
 	activeView, err := ctx.getCurrentStatView(r)
 	if err != nil {
@@ -227,28 +255,32 @@ func (ctx *TestbedContext) httpMain(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("%s", err), http.StatusInternalServerError)
 		return
 	}
-	genTableURL := func(tableType string) string {
-		v := url.Values{}
-		v.Set("view", activeView.Name)
-		v.Set("table", tableType)
-		return "/?" + v.Encode()
-	}
 	uiView := uiStatView{Name: activeView.Name}
-	uiView.TableTypes = map[string]uiTableType{
-		"stats":      {"Statistics", ctx.httpMainStatsTable, genTableURL("stats")},
-		"bugs":       {"Bugs", ctx.httpMainBugTable, genTableURL("bugs")},
-		"bug_counts": {"Bug Counts", ctx.httpMainBugCountsTable, genTableURL("bug_counts")},
+	tableTypes := ctx.getTableTypes()
+	if len(tableTypes) == 0 {
+		http.Error(w, "No tables are available", http.StatusInternalServerError)
+		return
+	}
+	uiView.TableTypes = map[string]uiTableType{}
+	for _, table := range tableTypes {
+		uiView.TableTypes[table.Key] = table
 	}
 	uiView.ActiveTableType = r.FormValue("table")
 	if uiView.ActiveTableType == "" {
-		uiView.ActiveTableType = "stats"
+		uiView.ActiveTableType = tableTypes[0].Key
 	}
 	tableType, found := uiView.TableTypes[uiView.ActiveTableType]
 	if !found {
 		http.Error(w, fmt.Sprintf("%s", err), http.StatusInternalServerError)
 		return
 	}
-	uiView.ActiveTable, err = tableType.Generator(tableType.URL+"&", activeView, r)
+	uiView.GenTableURL = func(t uiTableType) string {
+		v := url.Values{}
+		v.Set("view", activeView.Name)
+		v.Set("table", t.Key)
+		return "/?" + v.Encode()
+	}
+	uiView.ActiveTable, err = tableType.Generator(uiView.GenTableURL(tableType)+"&", *activeView, r)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("%s", err), http.StatusInternalServerError)
 		return
@@ -260,12 +292,12 @@ func (ctx *TestbedContext) httpMain(w http.ResponseWriter, r *http.Request) {
 		ActiveView: uiView,
 	}
 
-	executeTemplate(w, mainTemplate, data)
+	executeTemplate(w, mainTemplate, "testbed.html", data)
 }
 
-func executeTemplate(w http.ResponseWriter, templ *template.Template, data interface{}) {
+func executeTemplate(w http.ResponseWriter, templ *template.Template, name string, data interface{}) {
 	buf := new(bytes.Buffer)
-	if err := templ.Execute(buf, data); err != nil {
+	if err := templ.ExecuteTemplate(buf, name, data); err != nil {
 		log.Printf("failed to execute template: %v", err)
 		http.Error(w, fmt.Sprintf("failed to execute template: %v", err), http.StatusInternalServerError)
 		return
@@ -273,141 +305,6 @@ func executeTemplate(w http.ResponseWriter, templ *template.Template, data inter
 	w.Write(buf.Bytes())
 }
 
-var mainTemplate = html.CreatePage(`
-<!doctype html>
-<html>
-<head>
-	<title>{{.Name }} syzkaller</title>
-	{{HEAD}}
-	<style>
-	.positive-delta {
-		color:darkgreen;
-	}
-	.negative-delta {
-		color:darkred;
-	}
-	</style>
-</head>
-<body>
-
-<header id="topbar">
-	<table class="position_table">
-		<tbody>
-		<tr><td>
-		<h1><a href="/">syz-testbed "{{.Name }}"</a></h1>
-		</td></tr>
-		</tbody>
-	</table>
-	<table class="position_table">
-	<tbody>
-	<td class="navigation">
-Views:
-{{with $main := .}}
-{{range $view := .Views}}
-<a
-{{if eq $view.Name $main.ActiveView.Name}}
-class="navigation_tab_selected"
-{{else}}
-class="navigation_tab"
-{{end}}
-href="?view={{$view.Name}}">█ {{$view.Name}}</a>
-&nbsp;
-{{end}}
-{{end}}
-	</td>
-	</tbody>
-	</table>
-</header>
-
-{{define "PrintValue"}}
-	{{if or (lt . -100.0) (gt . 100.0)}}
-		{{printf "%.0f" .}}
-	{{else}}
-		{{printf "%.1f" .}}
-	{{end}}
-{{end}}
-
-{{define "PrintExtra"}}
-	{{if .PercentChange}}
-		{{$numVal := (dereference .PercentChange)}}
-		{{if ge $numVal 0.0}}
-			<span class="positive-delta">
-		{{else}}
-			<span class="negative-delta">
-		{{end}}
-		{{printf "%+.1f" $numVal}}%
-		</span>
-	{{end}}
-	{{if .PValue}}
-		p={{printf "%.2f" (dereference .PValue)}}
-	{{end}}
-{{end}}
-
-{{define "PrintTable"}}
-{{$uiTable := .}}
-{{if .Table}}
-{{if $uiTable.AlignedBy}}
-	The data are aligned by {{$uiTable.AlignedBy}} <br />
-{{end}}
-<table class="list_table">
-	<tr>
-	<th>{{.Table.TopLeftHeader}}</th>
-	{{range $c := .Table.ColumnHeaders}}
-		<th>
-		{{$url := ""}}
-                {{if $uiTable.ColumnURL}}{{$url = (call $uiTable.ColumnURL $c)}}{{end}}
-			{{if $url}}<a href="{{$url}}">{{$c}}</a>
-			{{else}}
-			{{$c}}
-			{{end}}
-		</th>
-		{{if $uiTable.Extra}}
-		<th>Δ</th>
-		{{end}}
-	{{end}}
-	</tr>
-	{{range $r := .Table.SortedRows}}
-	<tr>
-		<td>
-		{{$url := ""}}
-                {{if $uiTable.RowURL}}{{$url = (call $uiTable.RowURL $r)}}{{end}}
-			{{if $url}}<a href="{{$url}}">{{$r}}</a>
-			{{else}}
-			{{$r}}
-			{{end}}
-		</td>
-		{{range $c := $uiTable.Table.ColumnHeaders}}
-			{{$cell := ($uiTable.Table.Get $r $c)}}
-			{{if and $cell $uiTable.Extra}}
-			<td>{{template "PrintValue" $cell.Value}}</td>
-			<td>{{template "PrintExtra" $cell}}</td>
-			{{else}}
-			<td>{{$cell}}</td>
-			{{end}}
-		{{end}}
-	</tr>
-	{{end}}
-</table>
-{{end}}
-{{end}}
-
-{{template "PrintTable" .Summary}}
-{{$activeView := $.ActiveView}}
-<h2>Stat view "{{$activeView.Name}}"</h2>
-<b>Tables:
-{{range $typeKey, $type := $activeView.TableTypes}}
-	{{if eq $typeKey $activeView.ActiveTableType}}
-		{{$type.Title}}
-	{{else}}
-		<a href="{{$type.URL}}">{{$type.Title}}</a>
-	{{end}}
-	&nbsp;
-{{end}}
-</b> <br />
-<a href="/graph?view={{$.ActiveView.Name}}&over=fuzzing">Graph over time</a> /
-<a href="/graph?view={{$.ActiveView.Name}}&over=exec+total">Graph over executions</a> <br />
-{{template "PrintTable" $.ActiveView.ActiveTable}}
-
-</body>
-</html>
-`)
+//go:embed templates
+var testbedTemplates embed.FS
+var mainTemplate = pages.CreateFromFS(testbedTemplates, "templates/*.html")

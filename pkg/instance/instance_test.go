@@ -33,7 +33,7 @@ func TestFuzzerCmd(t *testing.T) {
 	flagDebug := flags.Bool("debug", false, "debug output from executor")
 	flagV := flags.Int("v", 0, "verbosity")
 	cmdLine := OldFuzzerCmd(os.Args[0], "/myexecutor", "myname", targets.Linux, targets.I386, "localhost:1234",
-		"namespace", 3, true, true, false, 0)
+		"namespace", 3, true, true, false, 5)
 	args := strings.Split(cmdLine, " ")[1:]
 	if err := flags.Parse(args); err != nil {
 		t.Fatal(err)
@@ -152,11 +152,10 @@ func TestRunnerCmd(t *testing.T) {
 	flagArch := flags.String("arch", "", "target architecture")
 	flagPool := flags.Int("pool", 0, "index of pool that started VM")
 	flagVM := flags.Int("vm", 0, "index of VM that started the Runner")
-	flagCollide := flags.Bool("collide", true, "collide syscalls to provoke data races")
 	flagThreaded := flags.Bool("threaded", true, "use threaded mode in executor")
 	flagEnv := flags.Bool("new-env", true, "create a new environment for each program")
 
-	cmdLine := RunnerCmd(os.Args[0], "localhost:1234", targets.Linux, targets.AMD64, 0, 0, false, false, false)
+	cmdLine := RunnerCmd(os.Args[0], "localhost:1234", targets.Linux, targets.AMD64, 0, 0, false, false)
 	args := strings.Split(cmdLine, " ")[1:]
 	if err := flags.Parse(args); err != nil {
 		t.Fatalf("error parsing flags: %v, want: nil", err)
@@ -180,10 +179,6 @@ func TestRunnerCmd(t *testing.T) {
 
 	if got, want := *flagVM, 0; got != want {
 		t.Errorf("bad vm index: %d, want: %d", got, want)
-	}
-
-	if got, want := *flagCollide, false; got != want {
-		t.Errorf("bad collide: %t, want: %t", got, want)
 	}
 
 	if got, want := *flagThreaded, false; got != want {
