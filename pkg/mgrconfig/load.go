@@ -237,6 +237,10 @@ func (cfg *Config) completeServices() error {
 func (cfg *Config) initTimeouts() {
 	slowdown := 1
 	switch {
+	case cfg.Type == "qemu" && runtime.GOARCH == "arm64" && cfg.SysTarget.Arch == "arm64":
+		// ARM64 hosts often don't support nested virtualization, in which case KVM acceleration is unavailable.
+		// Opportunistically increase the slowdown for every ARM64 guest on an ARM64 host.
+		slowdown = 5
 	case cfg.Type == "qemu" && runtime.GOARCH != cfg.SysTarget.Arch && runtime.GOARCH != cfg.SysTarget.VMArch:
 		// Assuming qemu emulation.
 		// Quick tests of mmap syscall on arm64 show ~9x slowdown.
