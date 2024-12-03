@@ -1,7 +1,7 @@
 // Copyright 2024 syzkaller project authors. All rights reserved.
 // Use of this source code is governed by Apache 2 LICENSE that can be found in the LICENSE file.
 
-// Generate KVM ARM64 register IDs for dev_kvm.txt
+// Generate KVM ARM64 register IDs for dev_kvm_arm64.txt
 // Usage:
 //
 //	go run registers.go msr_mrs.txt
