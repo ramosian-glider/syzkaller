@@ -531,7 +531,7 @@ func nextCallTarget(arch *Arch, textAddr uint64, data []byte, pos *int) (uint64,
 func readCoverPoints(target *targets.Target, info *symbolInfo, data []byte) ([2][]uint64, error) {
 	var pcs [2][]uint64
 	if len(info.tracePC) == 0 {
-		return pcs, fmt.Errorf("no __sanitizer_cov_trace_pc symbol in the object file")
+		return pcs, fmt.Errorf("no __sanitizer_cov_trace_pc[_guard] symbol in the object file")
 	}
 
 	i := 0
@@ -684,21 +684,22 @@ func parseLine(callInsns, traceFuncs [][]byte, ln []byte) uint64 {
 }
 
 func archCallInsn(target *targets.Target) ([][]byte, [][]byte) {
-	callName := [][]byte{[]byte(" <__sanitizer_cov_trace_pc>")}
+	callNames := [][]byte{[]byte(" <__sanitizer_cov_trace_pc>"), []byte("<__sanitizer_cov_trace_pc_guard>")}
 	switch target.Arch {
 	case targets.I386:
 		// c1000102:       call   c10001f0 <__sanitizer_cov_trace_pc>
-		return [][]byte{[]byte("\tcall ")}, callName
+		return [][]byte{[]byte("\tcall ")}, callNames
 	case targets.ARM64:
 		// ffff0000080d9cc0:       bl      ffff00000820f478 <__sanitizer_cov_trace_pc>
 		return [][]byte{[]byte("\tbl ")}, [][]byte{
 			[]byte("<__sanitizer_cov_trace_pc>"),
+			[]byte("<__sanitizer_cov_trace_pc_guard>"),
 			[]byte("<____sanitizer_cov_trace_pc_veneer>"),
 		}
 
 	case targets.ARM:
 		// 8010252c:       bl      801c3280 <__sanitizer_cov_trace_pc>
-		return [][]byte{[]byte("\tbl\t")}, callName
+		return [][]byte{[]byte("\tbl\t")}, callNames
 	case targets.PPC64LE:
 		// c00000000006d904:       bl      c000000000350780 <.__sanitizer_cov_trace_pc>
 		// This is only known to occur in the test:
@@ -709,19 +710,20 @@ func archCallInsn(target *targets.Target) ([][]byte, [][]byte) {
 			[]byte("<__sanitizer_cov_trace_pc>"),
 			[]byte("<__sanitizer_cov_trace_pc+0x8>"),
 			[]byte(" <.__sanitizer_cov_trace_pc>"),
+			[]byte("<__sanitizer_cov_trace_pc_guard>"),
 		}
 	case targets.MIPS64LE:
 		// ffffffff80100420:       jal     ffffffff80205880 <__sanitizer_cov_trace_pc>
 		// This is only known to occur in the test:
 		// b58:   bal     b30 <__sanitizer_cov_trace_pc>
-		return [][]byte{[]byte("\tjal\t"), []byte("\tbal\t")}, callName
+		return [][]byte{[]byte("\tjal\t"), []byte("\tbal\t")}, callNames
 	case targets.S390x:
 		// 1001de:       brasl   %r14,2bc090 <__sanitizer_cov_trace_pc>
-		return [][]byte{[]byte("\tbrasl\t")}, callName
+		return [][]byte{[]byte("\tbrasl\t")}, callNames
 	case targets.RiscV64:
 		// ffffffe000200018:       jal     ra,ffffffe0002935b0 <__sanitizer_cov_trace_pc>
 		// ffffffe0000010da:       jalr    1242(ra) # ffffffe0002935b0 <__sanitizer_cov_trace_pc>
-		return [][]byte{[]byte("\tjal\t"), []byte("\tjalr\t")}, callName
+		return [][]byte{[]byte("\tjal\t"), []byte("\tjalr\t")}, callNames
 	default:
 		panic(fmt.Sprintf("unknown arch %q", target.Arch))
 	}

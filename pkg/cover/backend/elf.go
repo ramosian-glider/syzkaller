@@ -50,7 +50,7 @@ const (
 // ARM64 linker inserts so-called veneers that act as trampolines for functions. We count calls to
 // such veneers as normal calls to __sanitizer_cov_trace_XXX.
 func getTraceCallbackType(name string) int {
-	if name == "__sanitizer_cov_trace_pc" || name == "____sanitizer_cov_trace_pc_veneer" {
+	if name == "__sanitizer_cov_trace_pc" || name == "____sanitizer_cov_trace_pc_veneer" || name == "__sanitizer_cov_trace_pc_guard" {
 		return TraceCbPc
 	}
 	if strings.HasPrefix(name, "__sanitizer_cov_trace_") ||
