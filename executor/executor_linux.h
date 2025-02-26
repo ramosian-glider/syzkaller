@@ -21,6 +21,7 @@ const int kSnapshotCoverSize = 1024 << 10;
 
 const unsigned long KCOV_TRACE_PC = 0;
 const unsigned long KCOV_TRACE_CMP = 1;
+const unsigned long KCOV_TRACE_UNIQUE_PC = 2;
 
 template <int N>
 struct kcov_remote_arg {
@@ -31,6 +32,35 @@ struct kcov_remote_arg {
 	uint64 common_handle;
 	uint64 handles[N];
 };
+
+struct kcov_buf_ctl_in {
+        __u32           buf_flags;      /* See KCOV_BUF_CTL_* flags below */
+        __u32           trace_size;     /* Desired trace size (in longs) */
+        __u32           bitmap_size;    /* Bitmap size for unique coverage collection (in bits) */
+};
+
+struct kcov_buf_ctl_out {
+        __u32           alloc_bytes;    /* Total buffer size to allocate using mmap() */
+        __u32           trace_size;     /* Recommended aligned trace size (in pointers) */
+        __u32           trace_offset;   /* Trace offset from the start of the mapping */
+        __u32           bitmap_size;    /* Recommended aligned bitmap size (in bits) */
+        __u32           bitmap_offset;  /* Bitmap offset from the start of the mapping */
+        __u32           pc_watermark;   /* High mark of the current coverage. */
+};
+
+struct kcov_buf_ctl {
+        struct          kcov_buf_ctl_in *in;
+        struct          kcov_buf_ctl_out *out;
+};
+
+#define KCOV_BUF_CTL_TRACE              0x1
+#define KCOV_BUF_CTL_BITMAP             0x2
+#define KCOV_BUF_CTL_PROBE              0x10
+
+#define KCOV_INIT_TRACE                 _IOR('c', 1, unsigned long)
+#define KCOV_INIT_BUFFERS               _IOWR('c', 20, struct kcov_buf_ctl)
+#define KCOV_ENABLE                     _IO('c', 100)
+#define KCOV_DISABLE                    _IO('c', 101)
 
 #define KCOV_INIT_TRACE32 _IOR('c', 1, uint32)
 #define KCOV_INIT_TRACE64 _IOR('c', 1, uint64)
@@ -109,9 +139,33 @@ static void cover_open(cover_t* cov, bool extra)
 	const int kcov_init_trace = is_kernel_64_bit ? KCOV_INIT_TRACE64 : KCOV_INIT_TRACE32;
 	const int cover_size = extra ? kExtraCoverSize : flag_snapshot ? kSnapshotCoverSize
 								       : kCoverSize;
-	if (ioctl(cov->fd, kcov_init_trace, cover_size))
-		fail("cover init trace write failed");
-	cov->mmap_alloc_size = cover_size * (is_kernel_64_bit ? 8 : 4);
+	struct kcov_buf_ctl_in ctl_in;
+	struct kcov_buf_ctl_out ctl_out;
+	struct kcov_buf_ctl ctl = {.in = &ctl_in, .out = &ctl_out};
+	memset(&ctl_out, 0, sizeof(ctl_out));
+	ctl_in.buf_flags = KCOV_BUF_CTL_TRACE | KCOV_BUF_CTL_BITMAP;
+	ctl_in.trace_size = kCoverSize / 2;
+	ctl_in.bitmap_size = kCoverSize / 2;
+	if (!ioctl(cov->fd, KCOV_INIT_BUFFERS, &ctl)) {
+		cov->mmap_alloc_size = ctl_out.alloc_bytes;
+		cov->trace_size = ctl_out.trace_size;
+		cov->bitmap_size = ctl_out.bitmap_size;
+		cov->trace_offset = ctl_out.trace_offset;
+		cov->bitmap_offset = ctl_out.bitmap_offset;
+		cov->bitmap_size = ctl_out.bitmap_size;
+		cov->have_dedup_kcov = true;
+	} else {
+		if (ioctl(cov->fd, kcov_init_trace, cover_size))
+			fail("cover init trace write failed");
+		cov->mmap_alloc_size = cover_size * (is_kernel_64_bit ? 8 : 4);
+		cov->trace_size = cov->mmap_alloc_size;
+		cov->trace_offset = 0;
+		cov->have_dedup_kcov = false;
+	}
+	cov->want_dedup_kcov = false;
+
+	cov->trace_skip = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
+	cov->pc_offset = 0;
 	if (pkeys_enabled)
 		debug("pkey protection enabled\n");
 }
@@ -146,21 +200,23 @@ static void cover_mmap(cover_t* cov)
 		exitf("cover mmap failed");
 	if (pkeys_enabled && pkey_mprotect(cov->alloc, cov->mmap_alloc_size, PROT_READ | PROT_WRITE, RESERVED_PKEY))
 		exitf("failed to pkey_mprotect kcov buffer");
-	cov->trace_offset = 0;
-	cov->trace = (char*)cov->alloc;
-	// TODO(glider): trace size and may be different from mmap_alloc_size in the future.
-	cov->trace_size = cov->mmap_alloc_size;
-	cov->trace_end = cov->trace + cov->mmap_alloc_size;
-	cov->trace_skip = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
-	cov->pc_offset = 0;
+	if (cov->have_dedup_kcov) {
+		cov->bitmap = (char*)cov->alloc + cov->bitmap_offset;
+	} else {
+		cov->bitmap = NULL;
+	}
+	cov->trace = (char*)cov->alloc + cov->trace_offset;
+	cov->trace_end = cov->trace + cov->trace_size;
 }
 
-static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
+static void cover_enable(cover_t* cov, bool collect_comps, bool extra, bool dedup_kcov)
 {
-	unsigned int kcov_mode = collect_comps ? KCOV_TRACE_CMP : KCOV_TRACE_PC;
+	unsigned int kcov_mode = collect_comps ? KCOV_TRACE_CMP : 
+		(dedup_kcov ? KCOV_TRACE_UNIQUE_PC: KCOV_TRACE_PC);
 	// The KCOV_ENABLE call should be fatal,
 	// but in practice ioctl fails with assorted errors (9, 14, 25),
 	// so we use exitf.
+	cov->want_dedup_kcov = cov->have_dedup_kcov && dedup_kcov;
 	if (!extra) {
 		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
 			exitf("cover enable write trace failed, mode=%d", kcov_mode);
@@ -189,7 +245,12 @@ static void cover_reset(cover_t* cov)
 		cov = &current_thread->cov;
 	}
 	cover_unprotect(cov);
-	*(uint64*)cov->trace = 0;
+	if (cov->want_dedup_kcov) {
+		memset(cov->bitmap, 0, cov->bitmap_size / 8);
+		*(uint64*)cov->trace = 0;
+	} else {
+		*(uint64*)cov->trace = 0;
+	}
 	cover_protect(cov);
 	cov->overflow = false;
 }

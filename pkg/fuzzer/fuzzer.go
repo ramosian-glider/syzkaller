@@ -468,6 +468,9 @@ func DefaultExecOpts(cfg *mgrconfig.Config, features flatrpc.Feature, debug bool
 	if !cfg.RawCover {
 		exec |= flatrpc.ExecFlagDedupCover
 	}
+	if cfg.Experimental.KcovDeduplicate {
+		exec |= flatrpc.ExecFlagDedupCoverKcov
+	}
 	return flatrpc.ExecOpts{
 		EnvFlags:   env,
 		ExecFlags:  exec,

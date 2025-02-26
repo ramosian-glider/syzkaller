@@ -277,6 +277,7 @@ static bool flag_collect_cover;
 static bool flag_collect_signal;
 static bool flag_dedup_cover;
 static bool flag_threaded;
+static bool flag_dedup_cover_kcov;
 
 // If true, then executor should write the comparisons data to fuzzer.
 static bool flag_comparisons;
@@ -354,11 +355,17 @@ struct cover_t {
 	char* trace;
 	uint32 trace_size;
 	char* trace_end;
+	char* bitmap;
+	uint32 bitmap_size;
+	intptr_t bitmap_offset;
 	// Offset of `trace` from the beginning of `alloc`. Should only be accessed
 	// by OS-specific code.
 	intptr_t trace_offset;
 	// Currently collecting comparisons.
 	bool collect_comps;
+	bool have_dedup_kcov;
+	// Currently using kcov's coverage deduplication feature.
+	bool want_dedup_kcov;
 	// Note: On everything but darwin the first value in trace is the count of
 	// recorded PCs, followed by the PCs. We therefore set trace_skip to the
 	// size of one PC.
@@ -668,7 +675,7 @@ int main(int argc, char** argv)
 		cover_protect(&extra_cov);
 		if (flag_extra_coverage) {
 			// Don't enable comps because we don't use them in the fuzzer yet.
-			cover_enable(&extra_cov, false, true);
+			cover_enable(&extra_cov, false, true, flag_dedup_cover_kcov);
 		}
 	}
 
@@ -777,7 +784,7 @@ void parse_handshake(const handshake_req& req)
 	sandbox_arg = req.sandbox_arg;
 #endif
 	is_kernel_64_bit = req.is_kernel_64_bit;
-	use_cover_edges = req.use_cover_edges;
+	use_cover_edges = 0;//req.use_cover_edges;
 	procid = req.pid;
 	syscall_timeout_ms = req.syscall_timeout_ms;
 	program_timeout_ms = req.program_timeout_ms;
@@ -821,13 +828,14 @@ void parse_execute(const execute_req& req)
 	flag_dedup_cover = req.exec_flags & (1 << 2);
 	flag_comparisons = req.exec_flags & (1 << 3);
 	flag_threaded = req.exec_flags & (1 << 4);
+	flag_dedup_cover_kcov = req.exec_flags & (1 << 5);
 	all_call_signal = req.all_call_signal;
 	all_extra_signal = req.all_extra_signal;
 
-	debug("[%llums] exec opts: reqid=%llu type=%llu procid=%llu threaded=%d cover=%d comps=%d dedup=%d signal=%d "
-	      " sandbox=%d/%d/%d/%d timeouts=%llu/%llu/%llu kernel_64_bit=%d\n",
+	debug("[%llums] exec opts: reqid=%llu type=%llu procid=%llu threaded=%d cover=%d comps=%d dedup=%d dedup_kcov=%d "
+	      " signal=%d sandbox=%d/%d/%d/%d timeouts=%llu/%llu/%llu kernel_64_bit=%d\n",
 	      current_time_ms() - start_time_ms, request_id, (uint64)request_type, procid, flag_threaded, flag_collect_cover,
-	      flag_comparisons, flag_dedup_cover, flag_collect_signal, flag_sandbox_none, flag_sandbox_setuid,
+	      flag_comparisons, flag_dedup_cover, flag_dedup_cover_kcov, flag_collect_signal, flag_sandbox_none, flag_sandbox_setuid,
 	      flag_sandbox_namespace, flag_sandbox_android, syscall_timeout_ms, program_timeout_ms, slowdown_scale,
 	      is_kernel_64_bit);
 	if (syscall_timeout_ms == 0 || program_timeout_ms <= syscall_timeout_ms || slowdown_scale == 0)
@@ -910,7 +918,7 @@ void execute_one()
 
 	if (cover_collection_required()) {
 		if (!flag_threaded)
-			cover_enable(&threads[0].cov, flag_comparisons, false);
+			cover_enable(&threads[0].cov, flag_comparisons, false, flag_dedup_cover_kcov);
 		if (flag_extra_coverage)
 			cover_reset(&extra_cov);
 	}
@@ -1188,7 +1196,7 @@ uint32 write_signal(flatbuffers::FlatBufferBuilder& fbb, int index, cover_t* cov
 	for (uint32 i = 0; i < cov->size; i++) {
 		cover_data_t pc = cover_data[i] + cov->pc_offset;
 		uint64 sig = pc;
-		if (use_cover_edges) {
+		if (use_cover_edges && !cov->want_dedup_kcov) {
 			// Only hash the lower 12 bits so the hash is independent of any module offsets.
 			const uint64 mask = (1 << 12) - 1;
 			sig ^= hash(prev_pc & mask) & mask;
@@ -1481,7 +1489,7 @@ void* worker_thread(void* arg)
 		// Setup coverage only after receiving the first ready event
 		// because in snapshot mode we don't know coverage mode for precreated threads.
 		if (first && cover_collection_required())
-			cover_enable(&th->cov, flag_comparisons, false);
+			cover_enable(&th->cov, flag_comparisons, false, flag_dedup_cover_kcov);
 		execute_call(th);
 		event_set(&th->done);
 	}

@@ -383,27 +383,30 @@ func (v ExecEnv) String() string {
 type ExecFlag uint64
 
 const (
-	ExecFlagCollectSignal ExecFlag = 1
-	ExecFlagCollectCover  ExecFlag = 2
-	ExecFlagDedupCover    ExecFlag = 4
-	ExecFlagCollectComps  ExecFlag = 8
-	ExecFlagThreaded      ExecFlag = 16
+	ExecFlagCollectSignal  ExecFlag = 1
+	ExecFlagCollectCover   ExecFlag = 2
+	ExecFlagDedupCover     ExecFlag = 4
+	ExecFlagCollectComps   ExecFlag = 8
+	ExecFlagThreaded       ExecFlag = 16
+	ExecFlagDedupCoverKcov ExecFlag = 32
 )
 
 var EnumNamesExecFlag = map[ExecFlag]string{
-	ExecFlagCollectSignal: "CollectSignal",
-	ExecFlagCollectCover:  "CollectCover",
-	ExecFlagDedupCover:    "DedupCover",
-	ExecFlagCollectComps:  "CollectComps",
-	ExecFlagThreaded:      "Threaded",
+	ExecFlagCollectSignal:  "CollectSignal",
+	ExecFlagCollectCover:   "CollectCover",
+	ExecFlagDedupCover:     "DedupCover",
+	ExecFlagCollectComps:   "CollectComps",
+	ExecFlagThreaded:       "Threaded",
+	ExecFlagDedupCoverKcov: "DedupCoverKcov",
 }
 
 var EnumValuesExecFlag = map[string]ExecFlag{
-	"CollectSignal": ExecFlagCollectSignal,
-	"CollectCover":  ExecFlagCollectCover,
-	"DedupCover":    ExecFlagDedupCover,
-	"CollectComps":  ExecFlagCollectComps,
-	"Threaded":      ExecFlagThreaded,
+	"CollectSignal":  ExecFlagCollectSignal,
+	"CollectCover":   ExecFlagCollectCover,
+	"DedupCover":     ExecFlagDedupCover,
+	"CollectComps":   ExecFlagCollectComps,
+	"Threaded":       ExecFlagThreaded,
+	"DedupCoverKcov": ExecFlagDedupCoverKcov,
 }
 
 func (v ExecFlag) String() string {
