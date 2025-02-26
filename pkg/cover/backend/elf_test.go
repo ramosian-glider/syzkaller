@@ -16,6 +16,7 @@ func TestGetTraceCallbackType(t *testing.T) {
 		TraceCbPc: {
 			"__sanitizer_cov_trace_pc",
 			"____sanitizer_cov_trace_pc_veneer",
+			"__sanitizer_cov_trace_pc_guard",
 		},
 		TraceCbCmp: {
 			"__sanitizer_cov_trace_cmp1",
