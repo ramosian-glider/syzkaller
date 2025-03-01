@@ -159,6 +159,7 @@ enum ExecFlag : uint64 (bit_flags) {
 	DedupCover,		// deduplicate coverage in executor
 	CollectComps,		// collect KCOV comparisons
 	Threaded,		// use multiple threads to mitigate blocked syscalls
+	DedupCoverKcov,		// use kcov builtin deduplication
 }
 
 struct ExecOptsRaw {

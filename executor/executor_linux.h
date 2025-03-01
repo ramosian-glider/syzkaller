@@ -32,11 +32,16 @@ struct kcov_remote_arg {
 	uint64 handles[N];
 };
 
+#define KCOV_INIT_TRACE                 _IOR('c', 1, unsigned long)
+#define KCOV_ENABLE                     _IO('c', 100)
+#define KCOV_DISABLE                    _IO('c', 101)
+
 #define KCOV_INIT_TRACE32 _IOR('c', 1, uint32)
 #define KCOV_INIT_TRACE64 _IOR('c', 1, uint64)
 #define KCOV_ENABLE _IO('c', 100)
 #define KCOV_DISABLE _IO('c', 101)
 #define KCOV_REMOTE_ENABLE _IOW('c', 102, kcov_remote_arg<0>)
+#define KCOV_UNIQUE_ENABLE              _IOR('c', 103, unsigned long)
 
 #define KCOV_SUBSYSTEM_COMMON (0x00ull << 56)
 #define KCOV_SUBSYSTEM_USB (0x01ull << 56)
@@ -112,6 +117,7 @@ static void cover_open(cover_t* cov, bool extra)
 	if (ioctl(cov->fd, kcov_init_trace, cover_size))
 		fail("cover init trace write failed");
 	cov->mmap_alloc_size = cover_size * (is_kernel_64_bit ? 8 : 4);
+	cov->want_dedup_kcov = false;
 	if (pkeys_enabled)
 		debug("pkey protection enabled\n");
 }
@@ -146,22 +152,32 @@ static void cover_mmap(cover_t* cov)
 		exitf("cover mmap failed");
 	if (pkeys_enabled && pkey_mprotect(cov->alloc, cov->mmap_alloc_size, PROT_READ | PROT_WRITE, RESERVED_PKEY))
 		exitf("failed to pkey_mprotect kcov buffer");
-	cov->trace_offset = 0;
+	// By default, set cov->trace to cov->alloc.
 	cov->trace = (char*)cov->alloc;
-	// TODO(glider): trace size and may be different from mmap_alloc_size in the future.
-	cov->trace_size = cov->mmap_alloc_size;
 	cov->trace_end = cov->trace + cov->mmap_alloc_size;
 	cov->trace_skip = is_kernel_64_bit ? sizeof(uint64_t) : sizeof(uint32_t);
 	cov->pc_offset = 0;
 }
 
-static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
+static void cover_enable(cover_t* cov, bool collect_comps, bool extra, bool dedup_kcov)
 {
 	unsigned int kcov_mode = collect_comps ? KCOV_TRACE_CMP : KCOV_TRACE_PC;
 	// The KCOV_ENABLE call should be fatal,
 	// but in practice ioctl fails with assorted errors (9, 14, 25),
 	// so we use exitf.
+	cov->want_dedup_kcov = dedup_kcov;
 	if (!extra) {
+		if (dedup_kcov) {
+			int err = ioctl(cov->fd, KCOV_UNIQUE_ENABLE, 4096/*TODO*/);
+			// TODO(glider): detect KCOV_UNIQUE_ENABLE support and fall back to KCOV_ENABLE.
+			if (err) {
+				exitf("cover enable write trace failed, mode=KCOV_UNIQUE_ENABLE");
+			}
+			cov->bitmap = (char *)cov->alloc;
+			cov->bitmap_words = 4096;
+			cov->trace = cov->bitmap + sizeof(unsigned long) * cov->bitmap_words;
+			return;
+		}
 		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
 			exitf("cover enable write trace failed, mode=%d", kcov_mode);
 		return;
@@ -189,7 +205,12 @@ static void cover_reset(cover_t* cov)
 		cov = &current_thread->cov;
 	}
 	cover_unprotect(cov);
-	*(uint64*)cov->trace = 0;
+	if (cov->want_dedup_kcov) {
+		memset(cov->bitmap, 0, cov->bitmap_words / sizeof(unsigned long));
+		*(uint64*)cov->trace = 0;
+	} else {
+		*(uint64*)cov->trace = 0;
+	}
 	cover_protect(cov);
 	cov->overflow = false;
 }

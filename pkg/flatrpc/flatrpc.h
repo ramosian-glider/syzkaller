@@ -632,49 +632,34 @@ enum class ExecFlag : uint64_t {
   DedupCover = 4ULL,
   CollectComps = 8ULL,
   Threaded = 16ULL,
+  DedupCoverKcov = 32ULL,
   NONE = 0,
-  ANY = 31ULL
+  ANY = 63ULL
 };
 FLATBUFFERS_DEFINE_BITMASK_OPERATORS(ExecFlag, uint64_t)
 
-inline const ExecFlag (&EnumValuesExecFlag())[5] {
+inline const ExecFlag (&EnumValuesExecFlag())[6] {
   static const ExecFlag values[] = {
     ExecFlag::CollectSignal,
     ExecFlag::CollectCover,
     ExecFlag::DedupCover,
     ExecFlag::CollectComps,
-    ExecFlag::Threaded
+    ExecFlag::Threaded,
+    ExecFlag::DedupCoverKcov
   };
   return values;
 }
 
-inline const char * const *EnumNamesExecFlag() {
-  static const char * const names[17] = {
-    "CollectSignal",
-    "CollectCover",
-    "",
-    "DedupCover",
-    "",
-    "",
-    "",
-    "CollectComps",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "Threaded",
-    nullptr
-  };
-  return names;
-}
-
 inline const char *EnumNameExecFlag(ExecFlag e) {
-  if (flatbuffers::IsOutRange(e, ExecFlag::CollectSignal, ExecFlag::Threaded)) return "";
-  const size_t index = static_cast<size_t>(e) - static_cast<size_t>(ExecFlag::CollectSignal);
-  return EnumNamesExecFlag()[index];
+  switch (e) {
+    case ExecFlag::CollectSignal: return "CollectSignal";
+    case ExecFlag::CollectCover: return "CollectCover";
+    case ExecFlag::DedupCover: return "DedupCover";
+    case ExecFlag::CollectComps: return "CollectComps";
+    case ExecFlag::Threaded: return "Threaded";
+    case ExecFlag::DedupCoverKcov: return "DedupCoverKcov";
+    default: return "";
+  }
 }
 
 enum class CallFlag : uint8_t {
