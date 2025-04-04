@@ -165,19 +165,20 @@ static void cover_enable(cover_t* cov, bool collect_comps, bool extra, bool dedu
 	// The KCOV_ENABLE call should be fatal,
 	// but in practice ioctl fails with assorted errors (9, 14, 25),
 	// so we use exitf.
-	cov->want_dedup_kcov = dedup_kcov;
-	if (!extra) {
-		if (dedup_kcov) {
-			int err = ioctl(cov->fd, KCOV_UNIQUE_ENABLE, 4096/*TODO*/);
-			// TODO(glider): detect KCOV_UNIQUE_ENABLE support and fall back to KCOV_ENABLE.
-			if (err) {
-				exitf("cover enable write trace failed, mode=KCOV_UNIQUE_ENABLE");
-			}
-			cov->bitmap = (char *)cov->alloc;
-			cov->bitmap_words = 4096;
-			cov->trace = cov->bitmap + sizeof(unsigned long) * cov->bitmap_words;
-			return;
+	cov->want_dedup_kcov = dedup_kcov && !extra && !collect_comps;
+	if (cov->want_dedup_kcov) {
+		int err = ioctl(cov->fd, KCOV_UNIQUE_ENABLE, 4096/*TODO*/);
+		// TODO(glider): detect KCOV_UNIQUE_ENABLE support and fall back to KCOV_ENABLE.
+		if (err) {
+			exitf("cover enable write trace failed, mode=KCOV_UNIQUE_ENABLE");
 		}
+		cov->bitmap = (char *)cov->alloc;
+		cov->bitmap_words = 4096;
+		cov->trace = cov->bitmap + sizeof(unsigned long) * cov->bitmap_words;
+		return;
+	}
+
+	if (!extra) {
 		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
 			exitf("cover enable write trace failed, mode=%d", kcov_mode);
 		return;
