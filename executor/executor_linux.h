@@ -41,7 +41,7 @@ struct kcov_remote_arg {
 #define KCOV_ENABLE _IO('c', 100)
 #define KCOV_DISABLE _IO('c', 101)
 #define KCOV_REMOTE_ENABLE _IOW('c', 102, kcov_remote_arg<0>)
-#define KCOV_UNIQUE_ENABLE              _IOR('c', 103, unsigned long)
+#define KCOV_UNIQUE_ENABLE              _IOW('c', 103, unsigned long)
 
 #define KCOV_SUBSYSTEM_COMMON (0x00ull << 56)
 #define KCOV_SUBSYSTEM_USB (0x01ull << 56)
