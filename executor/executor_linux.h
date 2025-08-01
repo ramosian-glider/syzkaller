@@ -188,8 +188,17 @@ static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
 	// but in practice ioctl fails with assorted errors (9, 14, 25),
 	// so we use exitf.
 	if (!extra) {
-		if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
-			exitf("cover enable write trace failed, mode=%d", kcov_mode);
+		if (flag_unique_coverage) {
+			if (ioctl(cov->fd, KCOV_UNIQUE_ENABLE, kCoverBitmapSize)) {
+				exitf("KCOV_UNIQUE_ENABLE failed");
+			}
+			int word_size = is_kernel_64_bit ? 8 : 4;
+			cov->data += kCoverBitmapSize * word_size;
+			cov->data_size -= kCoverBitmapSize * word_size;
+		} else {
+			if (ioctl(cov->fd, KCOV_ENABLE, kcov_mode))
+				exitf("cover enable write trace failed, mode=%d", kcov_mode);
+		}
 		cov->enabled = true;
 		return;
 	}
