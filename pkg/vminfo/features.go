@@ -140,6 +140,8 @@ func (ctx *checkContext) featureToFlags(feat flatrpc.Feature) (flatrpc.ExecEnv, 
 		execFlags |= flatrpc.ExecFlagCollectSignal | flatrpc.ExecFlagCollectCover
 	case flatrpc.FeatureKcovResetIoctl:
 		envFlags |= flatrpc.ExecEnvReadOnlyCoverage
+	case flatrpc.FeatureKcovUnique:
+		envFlags |= flatrpc.ExecEnvUniqueCoverage
 	case flatrpc.FeatureSandboxNone:
 		envFlags &= ^ctx.cfg.Sandbox
 		envFlags |= flatrpc.ExecEnvSandboxNone
