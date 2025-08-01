@@ -37,6 +37,7 @@ struct kcov_remote_arg {
 #define KCOV_ENABLE _IO('c', 100)
 #define KCOV_DISABLE _IO('c', 101)
 #define KCOV_REMOTE_ENABLE _IOW('c', 102, kcov_remote_arg<0>)
+#define KCOV_UNIQUE_ENABLE _IOW('c', 103, unsigned long)
 #define KCOV_RESET_TRACE _IO('c', 104)
 
 #define KCOV_SUBSYSTEM_COMMON (0x00ull << 56)
@@ -367,10 +368,34 @@ static const char* setup_kcov_reset_ioctl()
 	return error;
 }
 
+static const char* setup_kcov_unique()
+{
+	int fd = open("/sys/kernel/debug/kcov", O_RDWR);
+	if (fd == -1)
+		return "open of /sys/kernel/debug/kcov failed";
+	close(fd);
+
+	cover_t cov = {};
+	cov.fd = kCoverFd;
+	cover_open(&cov, false);
+	cover_mmap(&cov);
+	const char* error = NULL;
+	int ret;
+	// We don't know yet if KCOV_UNIQUE_ENABLE is supported, therefore we
+	// call the raw ioctl instead of cover_enable().
+	if ((ret = ioctl(cov.fd, KCOV_UNIQUE_ENABLE, 1024))) {
+		error = "kernel does not support ioctl(KCOV_UNIQUE_ENABLE)";
+	}
+	cover_munmap(&cov);
+	cover_close(&cov);
+	return error;
+}
+
 #define SYZ_HAVE_FEATURES 1
 static feature_t features[] = {
     {rpc::Feature::DelayKcovMmap, setup_delay_kcov},
     {rpc::Feature::KcovResetIoctl, setup_kcov_reset_ioctl},
+    {rpc::Feature::KcovUnique, setup_kcov_unique},
     {rpc::Feature::Fault, setup_fault},
     {rpc::Feature::Leak, setup_leak},
     {rpc::Feature::KCSAN, setup_kcsan},

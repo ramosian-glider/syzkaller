@@ -96,6 +96,7 @@ func test(t *testing.T, sysTarget *targets.Target) {
 				flatrpc.FeatureExtraCoverage |
 				flatrpc.FeatureDelayKcovMmap |
 				flatrpc.FeatureKcovResetIoctl |
+				flatrpc.FeatureKcovUnique |
 				flatrpc.FeatureSandboxNone |
 				flatrpc.FeatureFault |
 				flatrpc.FeatureNetDevices |
