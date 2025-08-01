@@ -73,6 +73,7 @@ const int kCoverFd = kOutPipeFd - kMaxThreads;
 const int kExtraCoverFd = kCoverFd - 1;
 const int kMaxArgs = 9;
 const int kCoverSize = 512 << 10;
+const int kCoverBitmapSize = 4 << 10;
 const int kFailStatus = 67;
 
 // Two approaches of dealing with kcov memory.
@@ -258,6 +259,7 @@ static bool flag_debug;
 static bool flag_snapshot;
 static bool flag_coverage;
 static bool flag_read_only_coverage;
+static bool flag_unique_coverage;
 static bool flag_sandbox_none;
 static bool flag_sandbox_setuid;
 static bool flag_sandbox_namespace;
@@ -832,6 +834,7 @@ void parse_handshake(const handshake_req& req)
 	flag_debug = (bool)(req.flags & rpc::ExecEnv::Debug);
 	flag_coverage = (bool)(req.flags & rpc::ExecEnv::Signal);
 	flag_read_only_coverage = (bool)(req.flags & rpc::ExecEnv::ReadOnlyCoverage);
+	flag_unique_coverage = (bool)(req.flags & rpc::ExecEnv::UniqueCoverage);
 	flag_sandbox_none = (bool)(req.flags & rpc::ExecEnv::SandboxNone);
 	flag_sandbox_setuid = (bool)(req.flags & rpc::ExecEnv::SandboxSetuid);
 	flag_sandbox_namespace = (bool)(req.flags & rpc::ExecEnv::SandboxNamespace);
