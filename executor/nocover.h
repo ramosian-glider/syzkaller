@@ -5,6 +5,10 @@ static void cover_open(cover_t* cov, bool extra)
 {
 }
 
+static void cover_close(cover_t* cov)
+{
+}
+
 static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
 {
 }

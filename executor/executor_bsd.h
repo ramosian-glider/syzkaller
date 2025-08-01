@@ -104,6 +104,14 @@ static void cover_open(cover_t* cov, bool extra)
 #endif
 }
 
+static void cover_close(cover_t* cov)
+{
+	if (cov->fd == -1)
+		fail("attempting to close an invalid cover fd");
+	close(cov->fd);
+	cov->fd = -1;
+}
+
 static void cover_mmap(cover_t* cov)
 {
 	if (cov->mmap_alloc_ptr != NULL)

@@ -78,6 +78,10 @@ static void cover_open(cover_t* cov, bool extra)
 	cov->data_size = kCoverSize * sizeof(unsigned long);
 }
 
+static void cover_close(cover_t* cov)
+{
+}
+
 static void cover_enable(cover_t* cov, bool collect_comps, bool extra)
 {
 	cov->collect_comps = collect_comps;
