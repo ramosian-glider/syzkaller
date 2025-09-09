@@ -144,6 +144,12 @@ func TestNextCallTargetARM64(t *testing.T) {
 			ExpTarget: 0xffff800080528d4c,
 			ExpPC:     0xffff80008052aa18,
 		},
+		// ffff8000800101f8:       94176dcc        bl      ffff8000805eb928 <__sanitizer_cov_trace_pc_guard>
+		{
+			Data:      []byte{0xcc, 0x6d, 0x17, 0x94},
+			ExpTarget: 0xffff8000805eb928,
+			ExpPC:     0xffff8000800101f8,
+		},
 	}
 	for _, test := range tests {
 		test.Arch = arches["arm64"]
@@ -168,6 +174,14 @@ func TestNextCallTargetAMD64(t *testing.T) {
 			ExpTarget: 0xffffffff81934050,
 			ExpPC:     0xffffffff811744c6,
 		},
+		// ffffffff8122d84c:	e8 af 76 1a 00          call   ffffffff813d4f00 <__sanitizer_cov_trace_pc_guard>
+		{
+			Data:      []byte{0xe8, 0xaf, 0x76, 0x1a, 0x00},
+			Text:      0xffffffff8122d84c,
+			ExpTarget: 0xffffffff813d4f00,
+			ExpPC:     0xffffffff8122d84c,
+		},
+
 	}
 	for _, test := range tests {
 		test.Arch = arches["amd64"]
