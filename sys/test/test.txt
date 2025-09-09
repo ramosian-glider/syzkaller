@@ -799,6 +799,15 @@ hint_ints {
 }
 
 # Mutation tests.
+noany_struct {
+	f0	int32
+	f1	int32
+	f2	int32
+	f3	int32
+	f4	array[int8]
+} [packed]
+
+mutate_noany(a ptr[in, noany_struct]) (noany)
 
 mutate0()
 mutate1()
