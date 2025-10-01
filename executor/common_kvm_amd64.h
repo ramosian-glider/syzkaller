@@ -252,18 +252,6 @@ struct kvm_syz_vm {
 #endif
 
 #if SYZ_EXECUTOR || __NR_syz_kvm_add_vcpu
-// See https://wiki.osdev.org/Interrupt_Descriptor_Table#Gate_Descriptor_2.
-struct idt_entry_64 {
-	uint16 offset_low;
-	uint16 selector;
-	// Interrupt Stack Table offset in bits 0..2
-	uint8 ist;
-	// Gate Type, P and DPL.
-	uint8 type_attr;
-	uint16 offset_mid;
-	uint32 offset_high;
-	uint32 reserved;
-} __attribute__((packed));
 
 // clang-format off
 // Post-processing code in pkg/csource/csource.go is very picky and requires the fail() call to be
