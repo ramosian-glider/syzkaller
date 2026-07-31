@@ -1,0 +1,68 @@
+site_name: Syzkaller Implementation Step-by-Step
+site_description: 21-Day Vacation Reading Guide to Syzkaller Architecture
+site_author: Syzkaller Learner
+repo_url: https://github.com/google/syzkaller
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.def_list_backend
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - admonition
+  - tables
+  - attr_list
+
+nav:
+  - Overview: README.md
+  - "Module 1: syz-manager":
+    - "Day 01: syz-manager Overview": 01-syz-manager-overview.md
+    - "Day 02: VM Management": 02-vm-management.md
+    - "Day 03: RPC Protocol": 03-rpc-protocol.md
+    - "Day 04: Corpus & Signal": 04-corpus-and-signal.md
+    - "Day 05: Crash Processing": 05-crash-processing.md
+    - "Day 06: Reproducer Pipeline": 06-reproducer-pipeline.md
+    - "Day 07: Syz-Hub": 07-syz-hub.md
+  - "Module 2: Coverage Engine":
+    - "Day 08: KCOV & Sanitizers": 08-kcov-and-sanitizers.md
+    - "Day 09: PC Signal Processing": 09-pc-processing-and-signal.md
+    - "Day 10: Symbolization": 10-symbolization.md
+    - "Day 11: Coverage Aggregation": 11-coverage-aggregation.md
+    - "Day 12: Coverage Visualization": 12-coverage-visualization.md
+  - "Module 3: Continuous Integration":
+    - "Day 13: syz-ci Architecture": 13-syz-ci-architecture.md
+    - "Day 14: VCS & Build Pipeline": 14-vcs-and-build-pipeline.md
+    - "Day 15: Bisection Engine": 15-bisection-engine.md
+    - "Day 16: CI Task Scheduler": 16-ci-task-scheduler.md
+  - "Module 4: Dashboard":
+    - "Day 17: Dashboard Architecture": 17-dashboard-architecture.md
+    - "Day 18: dashapi Protocol": 18-dashapi-protocol.md
+    - "Day 19: Bug Lifecycle & Email": 19-bug-lifecycle-and-email.md
+    - "Day 20: External Patch Testing": 20-patch-testing.md
+    - "Day 21: Subsystem Triage & AI": 21-subsystem-triage-and-ai.md
