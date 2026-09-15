@@ -2273,27 +2273,15 @@ func createUIBug(ctx context.Context, bug *Bug, state *ReportingState, managers 
 
 func mergeUIBug(ctx context.Context, bug *uiBug, dup *Bug) {
 	bug.NumCrashes += dup.NumCrashes
-	bug.BisectCause = mergeBisectStatus(bug.BisectCause, dup.BisectCause)
-	bug.BisectFix = mergeBisectStatus(bug.BisectFix, dup.BisectFix)
 	if bug.LastTime.Before(dup.LastTime) {
 		bug.LastTime = dup.LastTime
 	}
-	// Note: we intentionally don't merge the repro flags of the dup.
-	// The reproducers belong to the dup bug and are not displayed on the
-	// canonical bug page, so it would only be confusing. All the rest of the
-	// code (bug filtering, repro scheduling, reporting) also only considers
-	// the bug's own reproducers.
+	// Note: we intentionally don't merge the reproducers and the bisection
+	// results of the dup. They belong to the dup bug and are not displayed on
+	// the canonical bug page, so it would only be confusing. All the rest of
+	// the code (bug filtering, repro scheduling, bisection, reporting) also
+	// only considers the bug's own reproducers and bisections.
 	updateBugBadness(ctx, bug)
-}
-
-func mergeBisectStatus(a, b BisectStatus) BisectStatus {
-	// The statuses are stored in the datastore, so we can't reorder them.
-	// But if one of bisections is Yes, then we want to show Yes.
-	bisectPriority := [bisectStatusLast]int{0, 1, 2, 6, 5, 4, 3}
-	if bisectPriority[a] >= bisectPriority[b] {
-		return a
-	}
-	return b
 }
 
 func updateBugBadness(ctx context.Context, bug *uiBug) {

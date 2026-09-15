@@ -14,6 +14,7 @@ import (
 	"github.com/google/syzkaller/dashboard/dashapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	db "google.golang.org/appengine/v2/datastore"
 )
 
 func TestOnlyManagerFilter(t *testing.T) {
@@ -497,16 +498,17 @@ func TestReproSubmitAccess(t *testing.T) {
 	}
 }
 
-// The reproducers of duplicate bugs must not be attributed to the canonical bug
-// on the bug list pages -- the bug page does not display them either.
-func TestDupReproNotShownInList(t *testing.T) {
+// The reproducers and the bisection results of duplicate bugs must not be
+// attributed to the canonical bug on the bug list pages -- the bug page does
+// not display them either.
+func TestDupDataNotShownInList(t *testing.T) {
 	c := NewCtx(t)
 	defer c.Close()
 
 	build := testBuild(1)
 	c.client.UploadBuild(build)
 
-	// The canonical bug has no reproducer.
+	// The canonical bug has no reproducer and no bisections.
 	crash := testCrash(build, 1)
 	crash.Title = "canonical bug"
 	c.client.ReportCrash(crash)
@@ -522,6 +524,13 @@ func TestDupReproNotShownInList(t *testing.T) {
 	}
 	c.globalClient.updateBug(reports[dupCrash.Title].ID, dashapi.BugStatusDup, reports[crash.Title].ID)
 
+	// And the dup bug also has successful bisections.
+	dupBug, _, _ := c.loadBug(reports[dupCrash.Title].ID)
+	dupBug.BisectCause = BisectYes
+	dupBug.BisectFix = BisectYes
+	_, err := db.Put(c.ctx, dupBug.key(c.ctx), dupBug)
+	require.NoError(t, err)
+
 	groups, err := fetchNamespaceBugs(c.ctx, AccessAdmin, "test1", nil)
 	require.NoError(t, err)
 
@@ -534,6 +543,8 @@ func TestDupReproNotShownInList(t *testing.T) {
 	require.Equal(t, crash.Title, bug.Title)
 	assert.False(t, bug.HasCRepro)
 	assert.False(t, bug.HasSyzRepro)
+	assert.Equal(t, BisectNot, bug.BisectCause)
+	assert.Equal(t, BisectNot, bug.BisectFix)
 	// Crashes are still merged, though.
 	assert.EqualValues(t, 2, bug.NumCrashes)
 }
