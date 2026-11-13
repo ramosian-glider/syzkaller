@@ -694,6 +694,10 @@ func (jp *JobProcessor) testPatch(job *Job, mgrcfg *mgrconfig.Config) error {
 		resp.CrashTitle = rep.Title
 		resp.CrashAltTitles = rep.AltTitles
 		resp.CrashReport = rep.Report
+		resp.CrashRecipients = rep.Recipients.ToDash()
+		if rep.GuiltyFile != "" {
+			resp.CrashGuiltyFiles = []string{rep.GuiltyFile}
+		}
 	} else {
 		dt.Logf("testing succeeded, no crash reproduced")
 	}

@@ -11,6 +11,7 @@ import (
 	"html"
 	"maps"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strings"
 	"sync/atomic"
@@ -1491,12 +1492,21 @@ func TestAutoTestReproC(t *testing.T) {
 	require.Equal(t, dashapi.JobTestPatch, pollResp.Type)
 	require.Equal(t, "int main() { return 0; }", string(pollResp.ReproC))
 
-	// Complete the test job.
+	// Complete the test job with a downstream crash (different title) and verify
+	// that CrashRecipients and CrashGuiltyFiles from JobDoneReq are forwarded.
 	require.NoError(t, c.globalClient.JobDone(&dashapi.JobDoneReq{
 		ID:         pollResp.ID,
 		Build:      *testBuild(2),
-		CrashTitle: bug.Title,
+		CrashTitle: "KASAN: slab-use-after-free in net_rx",
+		CrashRecipients: dashapi.Recipients{
+			{Address: mail.Address{Address: "netdev@vger.kernel.org"}, Type: dashapi.To},
+		},
+		CrashGuiltyFiles: []string{"net/core/dev.c"},
 	}))
+	downstreamExtID := c.aiClient.pollEmailExtID()
+	_, downstreamCrash, _ := c.loadBug(downstreamExtID)
+	require.Equal(t, []string{"netdev@vger.kernel.org"}, downstreamCrash.Maintainers)
+	require.Equal(t, []string{"net/core/dev.c"}, downstreamCrash.ReportElements.GuiltyFiles)
 
 	// Subsequent poll should not re-trigger testing for already finished repro job.
 	pollResp2, err := c.globalClient.JobPoll(&dashapi.JobPollReq{
